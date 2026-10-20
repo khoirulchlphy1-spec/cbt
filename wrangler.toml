@@ -1,0 +1,9 @@
+name = "cbt-sman1toili"
+compatibility_date = "2024-09-23"
+pages_build_output_dir = "dist"
+
+# Konfigurasi binding Cloudflare D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "cbt-sman1toili-db"
+database_id = "MASUKKAN_DATABASE_ID_CLOUDFLARE_D1_ANDA"

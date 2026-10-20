@@ -1,0 +1,102 @@
+import { Submission } from '../types';
+
+export const INITIAL_SUBMISSIONS: Submission[] = [
+  {
+    id: 'sub-demo-1',
+    studentId: 'std-1',
+    studentName: 'Ahmad Rizky Pratama',
+    studentClass: 'X MIPA 1',
+    username: 'siswa1',
+    answers: { 0: 2, 1: 1, 2: 0, 3: 1, 4: 3, 5: 2, 6: 0, 7: 1, 8: 2, 9: 1 },
+    correct: 9,
+    wrong: 1,
+    score: 90,
+    submittedAt: '2026-10-14T08:45:00.000Z',
+    subjectName: 'Fisika',
+    examTitle: 'PENILAIAN HARIAN FISIKA X'
+  },
+  {
+    id: 'sub-demo-2',
+    studentId: 'std-2',
+    studentName: 'Siti Rahma Lestari',
+    studentClass: 'X MIPA 1',
+    username: 'siswa2',
+    answers: { 0: 2, 1: 1, 2: 0, 3: 1, 4: 2, 5: 2, 6: 0, 7: 1, 8: 0, 9: 1 },
+    correct: 8,
+    wrong: 2,
+    score: 80,
+    submittedAt: '2026-10-14T08:48:00.000Z',
+    subjectName: 'Fisika',
+    examTitle: 'PENILAIAN HARIAN FISIKA X'
+  },
+  {
+    id: 'sub-demo-3',
+    studentId: 'std-3',
+    studentName: 'Budi Santoso Wijaya',
+    studentClass: 'X MIPA 2',
+    username: 'siswa3',
+    answers: { 0: 2, 1: 1, 2: 0, 3: 1, 4: 3, 5: 2, 6: 0, 7: 1, 8: 2, 9: 1 },
+    correct: 10,
+    wrong: 0,
+    score: 100,
+    submittedAt: '2026-10-14T08:50:00.000Z',
+    subjectName: 'Fisika',
+    examTitle: 'PENILAIAN HARIAN FISIKA X'
+  },
+  {
+    id: 'sub-demo-4',
+    studentId: 'std-236',
+    studentName: 'Farhan Kurniawan',
+    studentClass: 'XI MIPA 1',
+    username: 'siswa236',
+    answers: { 0: 1, 1: 1, 2: 0, 3: 2, 4: 1, 5: 0 },
+    correct: 5,
+    wrong: 1,
+    score: 85,
+    submittedAt: '2026-10-14T10:40:00.000Z',
+    subjectName: 'Matematika',
+    examTitle: 'ULANGAN HARIAN MATEMATIKA XI'
+  },
+  {
+    id: 'sub-demo-5',
+    studentId: 'std-237',
+    studentName: 'Nadia Permata',
+    studentClass: 'XI MIPA 1',
+    username: 'siswa237',
+    answers: { 0: 1, 1: 1, 2: 0, 3: 2, 4: 1, 5: 1 },
+    correct: 4,
+    wrong: 2,
+    score: 75,
+    submittedAt: '2026-10-14T10:45:00.000Z',
+    subjectName: 'Matematika',
+    examTitle: 'ULANGAN HARIAN MATEMATIKA XI'
+  },
+  {
+    id: 'sub-demo-6',
+    studentId: 'std-471',
+    studentName: 'Hadi Maulana',
+    studentClass: 'XII MIPA 1',
+    username: 'siswa471',
+    answers: { 0: 0, 1: 1, 2: 2, 3: 3, 4: 0, 5: 1 },
+    correct: 6,
+    wrong: 0,
+    score: 95,
+    submittedAt: '2026-10-14T13:20:00.000Z',
+    subjectName: 'Tes Intelegensi Umum (TIU)',
+    examTitle: 'ANBK SIMULASI 1 - TIU'
+  },
+  {
+    id: 'sub-demo-7',
+    studentId: 'std-472',
+    studentName: 'Ratna Gunawan',
+    studentClass: 'XII IPS 1',
+    username: 'siswa472',
+    answers: { 0: 0, 1: 1, 2: 1, 3: 3, 4: 0, 5: 1 },
+    correct: 5,
+    wrong: 1,
+    score: 85,
+    submittedAt: '2026-10-14T13:25:00.000Z',
+    subjectName: 'Tes Intelegensi Umum (TIU)',
+    examTitle: 'ANBK SIMULASI 1 - TIU'
+  }
+];
