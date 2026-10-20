@@ -2571,7 +2571,7 @@ export default function App() {
           </div>
 
           <h1 className="text-2xl font-black text-white tracking-tight mb-2 uppercase">CBT ONLINE SMAN1 TOILI</h1>
-          <p className="text-slate-400 text-sm mb-8">Assesmen Sumatif Fisika</p>
+          <p className="text-slate-400 text-sm mb-8">Assesmen Sumatif</p>
 
           <div className="space-y-4">
             <button 
