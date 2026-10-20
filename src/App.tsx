@@ -2594,7 +2594,8 @@ export default function App() {
           </div>
 
           <div className="mt-8 pt-6 border-t border-slate-700/60 text-xs text-slate-400 font-semibold tracking-wide">
-            CBT Online Copyright Khoirul 2026
+            © 2026 CBT Online by Khoirul. All rights reserved.
+              Developed with dedication for better education.
           </div>
         </div>
       </div>
