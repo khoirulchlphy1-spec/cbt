@@ -47,6 +47,11 @@ export interface ExamPackage {
   subjectName?: string;
   questions?: Question[];
   createdAt?: string;
+  startDate?: string;
+  startTime?: string;
+  endDate?: string;
+  endTime?: string;
+  enableSchedule?: boolean;
 }
 
 export interface Submission {

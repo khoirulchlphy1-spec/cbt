@@ -1,0 +1,10 @@
+name = "cbt-sman1toili"
+compatibility_date = "2024-09-23"
+pages_build_output_dir = "dist"
+
+# Binding Database Cloudflare D1
+# Pastikan nama variable binding di Cloudflare Pages > Settings > Functions > D1 Database Bindings adalah "DB"
+[[d1_databases]]
+binding = "DB"
+database_name = "cbt-sman1toili-db"
+database_id = "cbt-sman1toili-db"

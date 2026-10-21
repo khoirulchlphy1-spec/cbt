@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Users, UserCheck, Clock, CheckCircle, AlertCircle, FileText, 
   LogOut, Send, Printer, LayoutDashboard, ChevronRight, ChevronLeft, Lock, Eye, X,
@@ -151,6 +151,9 @@ export default function App() {
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [teacherTab, setTeacherTab] = useState<'submissions' | 'students' | 'paket_ujian' | 'bank_soal' | 'violations' | 'controls' | 'staff_users' | 'subjects' | 'cloudflare'>('submissions');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [d1ConnectionError, setD1ConnectionError] = useState<string | null>(null);
+  const [isSyncingLive, setIsSyncingLive] = useState<boolean>(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string>('');
   const prevStudentsMapRef = useRef<Record<string, Student>>({});
 
   // Master Data Mata Pelajaran (Subjects)
@@ -271,7 +274,25 @@ export default function App() {
   }, []);
 
   const processIncomingStudents = (data: Student[]) => {
-    data.forEach(std => {
+    // Auto-heal any incoming student records that have missing/empty names from INITIAL_STUDENTS
+    const healed = data.map(std => {
+      if (!std.name || std.name.trim() === '') {
+        const backup = INITIAL_STUDENTS.find(b => b.id === std.id);
+        if (backup) {
+          return {
+            ...std,
+            name: backup.name,
+            class: (std.class && std.class.trim() !== '') ? std.class : backup.class,
+            username: (std.username && std.username.trim() !== '') ? std.username : backup.username,
+            password: (std.password && std.password.trim() !== '') ? std.password : backup.password,
+            session: (std.session && std.session.trim() !== '') ? std.session : backup.session
+          };
+        }
+      }
+      return std;
+    });
+
+    healed.forEach(std => {
       const prev = prevStudentsMapRef.current[std.id];
       if (prev) {
         if ((std.violationCount || 0) > (prev.violationCount || 0)) {
@@ -281,57 +302,101 @@ export default function App() {
       prevStudentsMapRef.current[std.id] = std;
     });
 
-    setStudents(data);
+    setStudents(healed);
 
     if (loggedStudentRef.current) {
-      const updatedSelf = data.find(s => s.id === loggedStudentRef.current?.id);
+      const updatedSelf = healed.find(s => s.id === loggedStudentRef.current?.id);
       if (updatedSelf) {
-        setLoggedStudent(updatedSelf);
+        setLoggedStudent(prev => ({
+          ...updatedSelf,
+          name: updatedSelf.name || prev?.name || '',
+          class: updatedSelf.class || prev?.class || '',
+          username: updatedSelf.username || prev?.username || ''
+        }));
       }
+    }
+  };
+
+  const applySyncPayload = useCallback((data: any) => {
+    if (!data) return;
+    if (data.isError) {
+      setD1ConnectionError(data.error || 'Cloudflare D1 belum terhubung ke Cloudflare Pages.');
+      return;
+    }
+    setD1ConnectionError(null);
+    setLastSyncTime(new Date().toLocaleTimeString('id-ID'));
+
+    if (Array.isArray(data.students)) {
+      processIncomingStudents(data.students);
+    }
+    if (Array.isArray(data.submissions)) {
+      const initialStudentMap = new Map(INITIAL_STUDENTS.map((s: any) => [s.id, s]));
+      const subs = data.submissions.map((sub: any) => {
+        if (!sub.studentName || String(sub.studentName).trim() === '') {
+          const std = (Array.isArray(data.students) ? data.students.find((s: any) => s.id === sub.studentId) : null) || initialStudentMap.get(sub.studentId);
+          if (std) {
+            return {
+              ...sub,
+              studentName: std.name || sub.studentName,
+              studentClass: (sub.studentClass && String(sub.studentClass).trim() !== '') ? sub.studentClass : (std.class || '-'),
+              username: (sub.username && String(sub.username).trim() !== '') ? sub.username : (std.username || '-'),
+              session: sub.session || std.session || ''
+            };
+          }
+        }
+        return sub;
+      });
+      subs.sort((a: any, b: any) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+      setSubmissions(subs);
+    }
+    if (Array.isArray(data.questionPackages)) {
+      setQuestionPackages(data.questionPackages);
+    }
+    if (Array.isArray(data.examPackages)) {
+      setExamPackages(data.examPackages);
+    }
+    if (Array.isArray(data.questions)) {
+      const qs = [...data.questions];
+      qs.sort((a, b) => {
+        const numA = parseInt(String(a.id).replace(/\D/g, '')) || 0;
+        const numB = parseInt(String(b.id).replace(/\D/g, '')) || 0;
+        return numA - numB;
+      });
+      setQuestions(qs);
+    }
+    if (Array.isArray(data.staffUsers)) {
+      setStaffUsers(data.staffUsers);
+    }
+    if (Array.isArray(data.subjects) && data.subjects.length > 0) {
+      setSubjects(data.subjects);
+    }
+    if (data.config) {
+      if (data.config.examToken) setExamToken(data.config.examToken);
+      if (data.config.unlockPin) setUnlockPin(data.config.unlockPin);
+      if (typeof data.config.isExamActiveGlobal === 'boolean') setIsExamActiveGlobal(data.config.isExamActiveGlobal);
+      if (data.config.activeSession) setActiveSession(data.config.activeSession);
+    }
+  }, []);
+
+  const handleManualLiveSync = async () => {
+    setIsSyncingLive(true);
+    try {
+      const data = await syncApi.getSyncData();
+      applySyncPayload(data);
+      if (data?.isError) {
+        showToast("⚠️ Cloudflare D1 belum terhubung di Cloudflare Pages.");
+      } else {
+        showToast("🟢 Sinkronisasi data real-time dari Cloudflare D1 berhasil!");
+      }
+    } catch (_) {
+      showToast("⚠️ Gagal sinkronisasi data.");
+    } finally {
+      setIsSyncingLive(false);
     }
   };
 
   // HTTP & SSE Realtime Sync Effect (Works across all devices/browsers)
   useEffect(() => {
-    const applySyncPayload = (data: any) => {
-      if (!data) return;
-      if (Array.isArray(data.students)) {
-        processIncomingStudents(data.students);
-      }
-      if (Array.isArray(data.submissions)) {
-        const subs = [...data.submissions];
-        subs.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
-        setSubmissions(subs);
-      }
-      if (Array.isArray(data.questionPackages)) {
-        setQuestionPackages(data.questionPackages);
-      }
-      if (Array.isArray(data.examPackages)) {
-        setExamPackages(data.examPackages);
-      }
-      if (Array.isArray(data.questions)) {
-        const qs = [...data.questions];
-        qs.sort((a, b) => {
-          const numA = parseInt(String(a.id).replace(/\D/g, '')) || 0;
-          const numB = parseInt(String(b.id).replace(/\D/g, '')) || 0;
-          return numA - numB;
-        });
-        setQuestions(qs);
-      }
-      if (Array.isArray(data.staffUsers)) {
-        setStaffUsers(data.staffUsers);
-      }
-      if (Array.isArray(data.subjects) && data.subjects.length > 0) {
-        setSubjects(data.subjects);
-      }
-      if (data.config) {
-        if (data.config.examToken) setExamToken(data.config.examToken);
-        if (data.config.unlockPin) setUnlockPin(data.config.unlockPin);
-        if (typeof data.config.isExamActiveGlobal === 'boolean') setIsExamActiveGlobal(data.config.isExamActiveGlobal);
-        if (data.config.activeSession) setActiveSession(data.config.activeSession);
-      }
-    };
-
     // Initial sync
     syncApi.getSyncData().then(applySyncPayload);
 
@@ -391,7 +456,21 @@ export default function App() {
       if (es) es.close();
       clearInterval(interval);
     };
-  }, []);
+  }, [applySyncPayload]);
+
+  // Fast 3-second live poller for Teacher & Admin Dashboard
+  // Menjamin nilai & jawaban siswa dari HP/laptop lain langsung masuk ke dashboard secara real-time
+  useEffect(() => {
+    if (role !== 'teacher_dashboard') return;
+
+    const interval = setInterval(() => {
+      syncApi.getSyncData().then((data: any) => {
+        if (data) applySyncPayload(data);
+      });
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [role, applySyncPayload]);
 
   // Firebase Firestore listener dimatikan sepenuhnya.
   // Seluruh sinkronisasi data dilakukan secara otomatis melalui Cloudflare D1 & Edge REST/SSE.
@@ -1161,6 +1240,29 @@ export default function App() {
         return;
       }
 
+      // Validasi Jadwal Ujian (jika diaktifkan)
+      if (matchedExam.enableSchedule && matchedExam.startDate && matchedExam.startTime) {
+        const now = new Date();
+        const [sY, sM, sD] = matchedExam.startDate.split('-').map(Number);
+        const [sH, sMin] = matchedExam.startTime.split(':').map(Number);
+        const startDt = new Date(sY, sM - 1, sD, sH, sMin, 0);
+
+        const endDStr = matchedExam.endDate || matchedExam.startDate;
+        const endTStr = matchedExam.endTime || '23:59';
+        const [eY, eM, eD] = endDStr.split('-').map(Number);
+        const [eH, eMin] = endTStr.split(':').map(Number);
+        const endDt = new Date(eY, eM - 1, eD, eH, eMin, 59);
+
+        if (now < startDt) {
+          setTokenError(`Jadwal Ujian "${matchedExam.title}" belum dimulai! Ujian baru dapat diakses pada ${matchedExam.startDate} pukul ${matchedExam.startTime} WITA.`);
+          return;
+        }
+        if (now > endDt) {
+          setTokenError(`Jadwal Ujian "${matchedExam.title}" telah berakhir pada ${endDStr} pukul ${endTStr} WITA.`);
+          return;
+        }
+      }
+
       const matchedPkg = questionPackages.find(p => p.id === matchedExam.questionPackageId);
       if (matchedPkg && matchedPkg.questions && matchedPkg.questions.length > 0) {
         setQuestions(matchedPkg.questions);
@@ -1173,13 +1275,38 @@ export default function App() {
       }
     } else if (cleanToken === examToken.trim().toUpperCase()) {
       if (eligibleExams.length > 0) {
-        setActiveExamPackage(eligibleExams[0]);
-        const matchedPkg = questionPackages.find(p => p.id === eligibleExams[0].questionPackageId);
+        const targetExam = eligibleExams[0];
+
+        // Validasi Jadwal Ujian jika menggunakan Token Global
+        if (targetExam.enableSchedule && targetExam.startDate && targetExam.startTime) {
+          const now = new Date();
+          const [sY, sM, sD] = targetExam.startDate.split('-').map(Number);
+          const [sH, sMin] = targetExam.startTime.split(':').map(Number);
+          const startDt = new Date(sY, sM - 1, sD, sH, sMin, 0);
+
+          const endDStr = targetExam.endDate || targetExam.startDate;
+          const endTStr = targetExam.endTime || '23:59';
+          const [eY, eM, eD] = endDStr.split('-').map(Number);
+          const [eH, eMin] = endTStr.split(':').map(Number);
+          const endDt = new Date(eY, eM - 1, eD, eH, eMin, 59);
+
+          if (now < startDt) {
+            setTokenError(`Jadwal Ujian "${targetExam.title}" belum dimulai! Ujian baru dapat diakses pada ${targetExam.startDate} pukul ${targetExam.startTime} WITA.`);
+            return;
+          }
+          if (now > endDt) {
+            setTokenError(`Jadwal Ujian "${targetExam.title}" telah berakhir pada ${endDStr} pukul ${endTStr} WITA.`);
+            return;
+          }
+        }
+
+        setActiveExamPackage(targetExam);
+        const matchedPkg = questionPackages.find(p => p.id === targetExam.questionPackageId);
         if (matchedPkg && matchedPkg.questions) {
           setQuestions(matchedPkg.questions);
         }
         if (!currentStudent.savedTimeLeft) {
-          setTimeLeft((eligibleExams[0].durationMinutes || 70) * 60);
+          setTimeLeft((targetExam.durationMinutes || 70) * 60);
         }
       } else {
         setActiveExamPackage(null);
@@ -1357,14 +1484,27 @@ export default function App() {
     const currentStudent = loggedStudentRef.current || loggedStudent;
 
     if (currentStudent) {
+      const studentBackup = students.find(s => s.id === currentStudent.id && s.name && s.name.trim() !== '') ||
+                            INITIAL_STUDENTS.find(s => s.id === currentStudent.id);
+      const studentName = (currentStudent.name && currentStudent.name.trim() !== '') 
+        ? currentStudent.name 
+        : (studentBackup?.name || currentStudent.username || `Siswa ${currentStudent.id}`);
+      const studentClass = (currentStudent.class && currentStudent.class.trim() !== '') 
+        ? currentStudent.class 
+        : (studentBackup?.class || 'X A');
+      const studentUsername = (currentStudent.username && currentStudent.username.trim() !== '') 
+        ? currentStudent.username 
+        : (studentBackup?.username || currentStudent.id);
+      const studentSession = currentStudent.session || studentBackup?.session || 'Sesi 1';
+
       const submissionId = `${currentStudent.id}_${Date.now()}`;
       const submissionData: Submission = {
         id: submissionId,
         studentId: currentStudent.id,
-        studentName: currentStudent.name,
-        studentClass: currentStudent.class,
-        username: currentStudent.username,
-        session: currentStudent.session || 'Sesi 1',
+        studentName: studentName,
+        studentClass: studentClass,
+        username: studentUsername,
+        session: studentSession,
         answers: currentAnswers,
         correct: correct,
         wrong: wrong,
@@ -1385,9 +1525,13 @@ export default function App() {
         return [submissionData, ...filtered];
       });
 
-      // Update student status to completed
+      // Update student status to completed with preserved identity
       const updatedStudent: Student = {
         ...currentStudent,
+        name: studentName,
+        class: studentClass,
+        username: studentUsername,
+        session: studentSession,
         status: 'completed',
         examAllowed: false
       };
@@ -1395,13 +1539,12 @@ export default function App() {
       setLoggedStudent(updatedStudent);
       setStudents(prev => prev.map(s => s.id === currentStudent.id ? updatedStudent : s));
 
-      syncApi.addSubmission(submissionData);
-      syncApi.updateStudent({
-        id: currentStudent.id,
-        status: 'completed',
-        examAllowed: false,
-        lastActiveAt: new Date().toISOString()
+      syncApi.addSubmission(submissionData).then(res => {
+        if (!res?.success) {
+          console.warn("D1 addSubmission status:", res);
+        }
       });
+      syncApi.updateStudent(updatedStudent);
 
       if (db) {
         try {
@@ -1976,18 +2119,28 @@ export default function App() {
 
     const score = questions.length > 0 ? Math.round((correct / questions.length) * 100) : 0;
 
+    const studentBackup = students.find(s => s.id === target.id && s.name && s.name.trim() !== '') ||
+                          INITIAL_STUDENTS.find(s => s.id === target.id);
+    const studentName = (target.name && target.name.trim() !== '') ? target.name : (studentBackup?.name || target.username || `Siswa ${target.id}`);
+    const studentClass = (target.class && target.class.trim() !== '') ? target.class : (studentBackup?.class || 'X A');
+    const studentUsername = (target.username && target.username.trim() !== '') ? target.username : (studentBackup?.username || target.id);
+    const studentSession = target.session || studentBackup?.session || 'Sesi 1';
+
     const submissionData: Submission = {
       id: `${target.id}_${Date.now()}`,
       studentId: target.id,
-      studentName: target.name,
-      studentClass: target.class,
-      username: target.username,
+      studentName: studentName,
+      studentClass: studentClass,
+      username: studentUsername,
+      session: studentSession,
       answers: studentAnswers,
       correct: correct,
       wrong: wrong,
       score: score,
       submittedAt: new Date().toISOString(),
-      isForced: true
+      isForced: true,
+      subjectName: activeExamPackage?.subjectName || 'Tes Intelegensi Umum',
+      examTitle: activeExamPackage?.title || 'Assesmen Sumatif CBT'
     };
 
     setSubmissions(prev => {
@@ -1997,19 +2150,40 @@ export default function App() {
 
     const updated = students.map(s => {
       if (s.id === studentId) {
-        return { ...s, status: 'completed' as const, examAllowed: false, lastActiveAt: new Date().toISOString() };
+        return { 
+          ...s, 
+          name: studentName,
+          class: studentClass,
+          username: studentUsername,
+          session: studentSession,
+          status: 'completed' as const, 
+          examAllowed: false, 
+          lastActiveAt: new Date().toISOString() 
+        };
       }
       return s;
     });
     setStudents(updated);
     if (loggedStudent?.id === studentId) {
-      setLoggedStudent(prev => prev ? { ...prev, status: 'completed', examAllowed: false } : null);
+      setLoggedStudent(prev => prev ? { 
+        ...prev, 
+        name: studentName,
+        class: studentClass,
+        username: studentUsername,
+        session: studentSession,
+        status: 'completed', 
+        examAllowed: false 
+      } : null);
     }
-    showToast(`⏹️ Ujian ${target.name} dihentikan dan hasilnya langsung masuk ke Hasil Ujian.`);
+    showToast(`⏹️ Ujian ${studentName} dihentikan dan hasilnya langsung masuk ke Hasil Ujian.`);
 
     syncApi.addSubmission(submissionData);
     syncApi.updateStudent({
-      id: studentId,
+      ...target,
+      name: studentName,
+      class: studentClass,
+      username: studentUsername,
+      session: studentSession,
       status: 'completed',
       examAllowed: false,
       lastActiveAt: new Date().toISOString()
@@ -2051,22 +2225,40 @@ export default function App() {
         });
         const score = questions.length > 0 ? Math.round((correct / questions.length) * 100) : 0;
 
+        const studentBackup = INITIAL_STUDENTS.find(b => b.id === s.id);
+        const studentName = (s.name && s.name.trim() !== '') ? s.name : (studentBackup?.name || s.username || `Siswa ${s.id}`);
+        const studentClass = (s.class && s.class.trim() !== '') ? s.class : (studentBackup?.class || 'X A');
+        const studentUsername = (s.username && s.username.trim() !== '') ? s.username : (studentBackup?.username || s.id);
+        const studentSession = s.session || studentBackup?.session || 'Sesi 1';
+
         const sub: Submission = {
           id: `${s.id}_${Date.now()}`,
           studentId: s.id,
-          studentName: s.name,
-          studentClass: s.class,
-          username: s.username,
+          studentName: studentName,
+          studentClass: studentClass,
+          username: studentUsername,
+          session: studentSession,
           answers: studentAnswers,
           correct: correct,
           wrong: wrong,
           score: score,
           submittedAt: new Date().toISOString(),
-          isForced: true
+          isForced: true,
+          subjectName: activeExamPackage?.subjectName || 'Tes Intelegensi Umum',
+          examTitle: activeExamPackage?.title || 'Assesmen Sumatif CBT'
         };
         newSubmissions.push(sub);
 
-        return { ...s, status: 'completed', examAllowed: false, lastActiveAt: new Date().toISOString() };
+        return { 
+          ...s, 
+          name: studentName,
+          class: studentClass,
+          username: studentUsername,
+          session: studentSession,
+          status: 'completed' as const, 
+          examAllowed: false, 
+          lastActiveAt: new Date().toISOString() 
+        };
       }
       return s;
     });
@@ -2082,12 +2274,10 @@ export default function App() {
 
     for (const sub of newSubmissions) {
       syncApi.addSubmission(sub);
-      syncApi.updateStudent({
-        id: sub.studentId,
-        status: 'completed',
-        examAllowed: false,
-        lastActiveAt: new Date().toISOString()
-      });
+      const studentObj = updated.find(s => s.id === sub.studentId);
+      if (studentObj) {
+        syncApi.updateStudent(studentObj);
+      }
     }
 
     if (db) {
@@ -2571,7 +2761,7 @@ export default function App() {
           </div>
 
           <h1 className="text-2xl font-black text-white tracking-tight mb-2 uppercase">CBT ONLINE SMAN1 TOILI</h1>
-          <p className="text-slate-400 text-sm mb-8">Assesmen Sumatif</p>
+          <p className="text-slate-400 text-sm mb-8">Assesmen Sumatif Fisika</p>
 
           <div className="space-y-4">
             <button 
@@ -2594,8 +2784,7 @@ export default function App() {
           </div>
 
           <div className="mt-8 pt-6 border-t border-slate-700/60 text-xs text-slate-400 font-semibold tracking-wide">
-            © 2026 CBT Online by Khoirul. All rights reserved.
-              Developed with dedication for better education.
+            CBT Online Copyright Khoirul 2026
           </div>
         </div>
       </div>
@@ -3134,6 +3323,11 @@ export default function App() {
                           <p className="text-[10px] text-slate-400 mt-0.5">
                             Durasi: <span className="font-semibold text-slate-200">{exam.durationMinutes} Menit</span> • {pkg?.questions?.length || 0} Soal
                           </p>
+                          {exam.enableSchedule && exam.startDate && exam.startTime && (
+                            <span className="inline-block mt-1 text-[10px] font-semibold text-indigo-300 bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-700/50">
+                              📅 Jadwal: {exam.startDate} ({exam.startTime} - {exam.endTime || 'Selesai'} WITA)
+                            </span>
+                          )}
                         </div>
                         <div className="text-right flex flex-col items-end gap-1">
                           <span className="font-mono font-bold text-xs bg-slate-800 text-amber-300 px-2.5 py-1 rounded-lg border border-amber-500/30">
@@ -3388,15 +3582,40 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-end">
+              {/* D1 Connection Status */}
+              <div 
+                title={d1ConnectionError ? `Error: ${d1ConnectionError}` : 'Cloudflare D1 terhubung aktif secara native'}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-all ${
+                  d1ConnectionError 
+                    ? 'bg-amber-400 text-indigo-950 border-amber-300' 
+                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${d1ConnectionError ? 'bg-amber-900 animate-ping' : 'bg-emerald-400'}`}></span>
+                <span>{d1ConnectionError ? 'D1 Belum Bind' : 'D1 Real-time'}</span>
+                {lastSyncTime && <span className="text-[10px] opacity-80 hidden md:inline">• {lastSyncTime}</span>}
+              </div>
+
+              {/* Segarkan Data Manual */}
+              <button
+                onClick={handleManualLiveSync}
+                disabled={isSyncingLive}
+                title="Tarik data terbaru dari server Cloudflare D1"
+                className="bg-indigo-800 hover:bg-indigo-700 disabled:opacity-50 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center transition-colors shadow-xs cursor-pointer border border-indigo-600/60 text-white"
+              >
+                <RefreshCw size={13} className={`mr-1.5 ${isSyncingLive ? 'animate-spin text-amber-400' : ''}`} />
+                <span>{isSyncingLive ? 'Menyinkronkan...' : 'Segarkan Data'}</span>
+              </button>
+
               <button 
                 onClick={() => {
                   setRole('selection');
                   setCurrentStaffUser(null);
                 }}
-                className="bg-red-500/90 hover:bg-red-600 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center transition-colors shadow-xs cursor-pointer border border-red-400/50"
+                className="bg-red-500/90 hover:bg-red-600 px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center transition-colors shadow-xs cursor-pointer border border-red-400/50"
               >
-                <LogOut size={14} className="mr-1.5"/> Ganti Akun / Keluar
+                <LogOut size={14} className="mr-1.5"/> Keluar
               </button>
             </div>
           </div>
@@ -3545,6 +3764,37 @@ export default function App() {
         </header>
 
         <div className="max-w-7xl mx-auto px-6 mt-6">
+          {d1ConnectionError && (
+            <div className="mb-6 bg-amber-50 border-2 border-amber-400 rounded-2xl p-4.5 shadow-sm flex items-start gap-3.5 animate-fadeIn">
+              <AlertTriangle className="text-amber-600 shrink-0 mt-0.5" size={26} />
+              <div className="space-y-1.5 text-sm text-slate-800 flex-1">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <p className="font-black text-amber-950 text-base">⚠️ Perhatian: Cloudflare D1 Belum Terhubung di Cloudflare Pages</p>
+                  <button 
+                    onClick={handleManualLiveSync} 
+                    className="text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+                  >
+                    <RefreshCw size={13} className={isSyncingLive ? 'animate-spin' : ''} />
+                    Cek Ulang Koneksi
+                  </button>
+                </div>
+                <p className="text-xs text-amber-900 leading-relaxed font-medium">
+                  Jawaban siswa dari HP atau perangkat lain <strong>belum dapat masuk ke server</strong> karena binding D1 belum dipasang pada proyek Cloudflare Pages Anda.
+                </p>
+                <div className="bg-white/95 p-3.5 rounded-xl border border-amber-300 text-xs text-slate-700 space-y-1.5 mt-2">
+                  <p className="font-bold text-slate-900">Cara menyambungkan dalam 1 menit:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-slate-700 font-medium">
+                    <li>Buka <a href="https://dash.cloudflare.com" target="_blank" rel="noreferrer" className="text-indigo-600 font-bold underline">dash.cloudflare.com</a> &gt; klik menu <b>Workers &amp; Pages</b> &gt; pilih project Pages CBT Anda.</li>
+                    <li>Buka tab <b>Settings</b> &gt; klik menu <b>Functions</b> di sebelah kiri.</li>
+                    <li>Scroll ke bawah ke bagian <b>D1 Database Bindings</b> &gt; klik <b>Add binding</b>.</li>
+                    <li>Isi <b>Variable name</b>: <code className="bg-slate-100 text-indigo-700 px-1.5 py-0.5 rounded font-mono font-bold border border-slate-300">DB</code> (wajib huruf kapital).</li>
+                    <li>Pilih <b>D1 database</b> yang sudah Anda buat sebelumnya.</li>
+                    <li>Klik <b>Save</b>. Terakhir, buka tab <b>Deployments</b> &gt; klik titik tiga di deployment terbaru &gt; klik <b>Retry deployment</b>.</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* TAB 1: HASIL UJIAN & ARSIP PER MATA PELAJARAN DAN KELAS */}
           {teacherTab === 'submissions' && (
@@ -4201,6 +4451,57 @@ export default function App() {
                             <span className="font-bold text-slate-800">{exam.durationMinutes} Menit</span>
                           </div>
                         </div>
+
+                        {exam.enableSchedule && exam.startDate && exam.startTime ? (
+                          <div className="mb-4 p-3 bg-indigo-50/80 border border-indigo-200/90 rounded-xl text-xs text-indigo-950 flex items-start gap-2.5">
+                            <Clock size={16} className="text-indigo-600 mt-0.5 shrink-0" />
+                            <div className="flex-1">
+                              <span className="font-bold block text-[10px] text-indigo-600 uppercase tracking-wider">
+                                JADWAL PELAKSANAAN UJIAN
+                              </span>
+                              <p className="font-bold text-slate-800 text-xs mt-0.5">
+                                📅 {exam.startDate} • ⏰ {exam.startTime} - {exam.endTime || 'Selesai'} WITA
+                              </p>
+                              {(() => {
+                                const now = new Date();
+                                const [sY, sM, sD] = exam.startDate.split('-').map(Number);
+                                const [sH, sMin] = exam.startTime.split(':').map(Number);
+                                const sDt = new Date(sY, sM - 1, sD, sH, sMin, 0);
+
+                                const eDStr = exam.endDate || exam.startDate;
+                                const eTStr = exam.endTime || '23:59';
+                                const [eY, eM, eD] = eDStr.split('-').map(Number);
+                                const [eH, eMin] = eTStr.split(':').map(Number);
+                                const eDt = new Date(eY, eM - 1, eD, eH, eMin, 59);
+
+                                if (now < sDt) {
+                                  return (
+                                    <span className="inline-block mt-1 text-[10px] font-bold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-full">
+                                      🕒 Belum Mulai (Terjadwal)
+                                    </span>
+                                  );
+                                } else if (now > eDt) {
+                                  return (
+                                    <span className="inline-block mt-1 text-[10px] font-bold text-slate-500 bg-slate-200 px-2 py-0.5 rounded-full">
+                                      ⌛ Telah Berakhir
+                                    </span>
+                                  );
+                                } else {
+                                  return (
+                                    <span className="inline-block mt-1 text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full animate-pulse">
+                                      🟢 Sedang Berlangsung
+                                    </span>
+                                  );
+                                }
+                              })()}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="mb-4 px-3 py-1.5 bg-slate-100 rounded-xl text-[11px] text-slate-500 font-medium flex items-center gap-1.5">
+                            <Clock size={13} className="text-slate-400" />
+                            <span>Jadwal Fleksibel (Kapan saja selama Aktif)</span>
+                          </div>
+                        )}
 
                         <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl flex items-center justify-between">
                           <div>

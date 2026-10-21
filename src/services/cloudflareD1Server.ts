@@ -160,6 +160,11 @@ export const cloudflareD1Server = {
         duration_minutes INTEGER DEFAULT 70,
         is_active INTEGER DEFAULT 1,
         subject_name TEXT,
+        start_date TEXT,
+        start_time TEXT,
+        end_date TEXT,
+        end_time TEXT,
+        enable_schedule INTEGER DEFAULT 0,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
       );`,
       `CREATE TABLE IF NOT EXISTS submissions (
@@ -483,13 +488,28 @@ export const cloudflareD1Server = {
     }
   },
 
-  // Background persistence helper: Upsert single student to Cloudflare D1
+  // Background persistence helper: Upsert single student to Cloudflare D1 (Aman tanpa menghapus identitas)
   persistStudentAsync(student: any) {
     if (!this.isConfigured() || !student?.id) return;
     this.query(
-      `INSERT OR REPLACE INTO students 
+      `INSERT INTO students 
       (id, name, class, username, password, exam_allowed, status, violation_count, last_violation_reason, session, saved_answers, saved_doubtful, saved_time_left, current_question_idx, last_active_at) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = CASE WHEN excluded.name IS NOT NULL AND excluded.name != '' THEN excluded.name ELSE students.name END,
+        class = CASE WHEN excluded.class IS NOT NULL AND excluded.class != '' THEN excluded.class ELSE students.class END,
+        username = CASE WHEN excluded.username IS NOT NULL AND excluded.username != '' THEN excluded.username ELSE students.username END,
+        password = CASE WHEN excluded.password IS NOT NULL AND excluded.password != '' THEN excluded.password ELSE students.password END,
+        session = CASE WHEN excluded.session IS NOT NULL AND excluded.session != '' THEN excluded.session ELSE students.session END,
+        exam_allowed = excluded.exam_allowed,
+        status = excluded.status,
+        violation_count = excluded.violation_count,
+        last_violation_reason = excluded.last_violation_reason,
+        saved_answers = CASE WHEN excluded.saved_answers IS NOT NULL AND excluded.saved_answers != '{}' THEN excluded.saved_answers ELSE students.saved_answers END,
+        saved_doubtful = CASE WHEN excluded.saved_doubtful IS NOT NULL AND excluded.saved_doubtful != '{}' THEN excluded.saved_doubtful ELSE students.saved_doubtful END,
+        saved_time_left = coalesce(excluded.saved_time_left, students.saved_time_left),
+        current_question_idx = excluded.current_question_idx,
+        last_active_at = excluded.last_active_at;`,
       [
         student.id,
         student.name || '',
@@ -514,20 +534,33 @@ export const cloudflareD1Server = {
   persistSubmissionAsync(submission: any) {
     if (!this.isConfigured() || !submission?.id) return;
     this.query(
-      `INSERT OR REPLACE INTO submissions 
+      `INSERT INTO submissions 
       (id, student_id, student_name, student_class, username, session, answers_json, correct, wrong, score, submitted_at, is_forced, subject_name, exam_title) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        student_name = CASE WHEN excluded.student_name IS NOT NULL AND excluded.student_name != '' THEN excluded.student_name ELSE submissions.student_name END,
+        student_class = CASE WHEN excluded.student_class IS NOT NULL AND excluded.student_class != '' THEN excluded.student_class ELSE submissions.student_class END,
+        username = CASE WHEN excluded.username IS NOT NULL AND excluded.username != '' THEN excluded.username ELSE submissions.username END,
+        session = CASE WHEN excluded.session IS NOT NULL AND excluded.session != '' THEN excluded.session ELSE submissions.session END,
+        answers_json = excluded.answers_json,
+        correct = excluded.correct,
+        wrong = excluded.wrong,
+        score = excluded.score,
+        submitted_at = excluded.submitted_at,
+        is_forced = excluded.is_forced,
+        subject_name = CASE WHEN excluded.subject_name IS NOT NULL AND excluded.subject_name != '' THEN excluded.subject_name ELSE submissions.subject_name END,
+        exam_title = CASE WHEN excluded.exam_title IS NOT NULL AND excluded.exam_title != '' THEN excluded.exam_title ELSE submissions.exam_title END;`,
       [
         submission.id,
-        submission.studentId,
-        submission.studentName,
-        submission.studentClass,
-        submission.username,
+        submission.studentId || '',
+        submission.studentName || '',
+        submission.studentClass || '',
+        submission.username || '',
         submission.session || '',
         JSON.stringify(submission.answers || {}),
-        submission.correct,
-        submission.wrong,
-        submission.score,
+        Number(submission.correct) || 0,
+        Number(submission.wrong) || 0,
+        Number(submission.score) || 0,
         submission.submittedAt || new Date().toISOString(),
         submission.isForced ? 1 : 0,
         submission.subjectName || '',

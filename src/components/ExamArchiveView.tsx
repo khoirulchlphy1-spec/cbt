@@ -56,9 +56,26 @@ export function ExamArchiveView({
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [viewMode, setViewMode] = useState<'archive' | 'table'>('archive');
 
-  // Filter submissions
+  // Filter submissions (dengan auto-resolving nama dan identitas siswa dari data master siswa)
   const filteredSubmissions = useMemo(() => {
-    return submissions.filter(sub => {
+    return submissions.map(sub => {
+      const studentInfo = students.find(s => s.id === sub.studentId);
+      const studentName = (sub.studentName && String(sub.studentName).trim() !== '')
+        ? sub.studentName
+        : (studentInfo?.name || (sub.studentId ? `Siswa (${sub.studentId})` : '-'));
+      const studentClass = (sub.studentClass && String(sub.studentClass).trim() !== '')
+        ? sub.studentClass
+        : (studentInfo?.class || '-');
+      const username = (sub.username && String(sub.username).trim() !== '')
+        ? sub.username
+        : (studentInfo?.username || '-');
+      return {
+        ...sub,
+        studentName,
+        studentClass,
+        username
+      };
+    }).filter(sub => {
       // Subject filter
       if (selectedSubject !== 'ALL') {
         const subMapel = (sub.subjectName || '').toLowerCase();
@@ -84,7 +101,7 @@ export function ExamArchiveView({
 
       return true;
     });
-  }, [submissions, selectedSubject, selectedClass, searchTerm]);
+  }, [submissions, students, selectedSubject, selectedClass, searchTerm]);
 
   // Compute statistics
   const stats = useMemo(() => {

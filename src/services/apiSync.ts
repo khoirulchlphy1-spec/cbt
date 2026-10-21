@@ -4,20 +4,44 @@ export const syncApi = {
   async getSyncData() {
     try {
       const res = await fetch('/api/sync');
-      if (!res.ok) return null;
-      return await res.json();
-    } catch (e) {
-      return null;
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        return { 
+          isError: true, 
+          error: errJson?.error || `HTTP ${res.status}: ${res.statusText}`,
+          status: res.status 
+        };
+      }
+      const data = await res.json();
+      return { ...data, isError: false };
+    } catch (e: any) {
+      return { isError: true, error: e.message || 'Gagal menghubungi server', isNetworkError: true };
     }
+  },
+
+  async getSubmissions(): Promise<Submission[]> {
+    try {
+      const res = await fetch('/api/submissions');
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      console.warn("API getSubmissions failed:", e);
+    }
+    return [];
   },
 
   async updateStudent(student: Partial<Student> & { id: string }) {
     try {
-      await fetch('/api/students', {
+      const res = await fetch('/api/students', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(student)
       });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        console.warn(`API updateStudent error (${res.status}):`, text);
+      }
     } catch (e) {
       console.warn("API updateStudent failed:", e);
     }
@@ -55,16 +79,31 @@ export const syncApi = {
     }
   },
 
-  async addSubmission(submission: Submission) {
-    try {
-      await fetch('/api/submissions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(submission)
-      });
-    } catch (e) {
-      console.warn("API addSubmission failed:", e);
+  async addSubmission(submission: Submission): Promise<{ success: boolean; error?: string }> {
+    let lastError = '';
+    // Retry up to 3 times to ensure answer sheet is NEVER lost even on flaky mobile connection
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await fetch('/api/submissions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(submission)
+        });
+        if (res.ok) {
+          return { success: true };
+        }
+        const errJson = await res.json().catch(() => null);
+        lastError = errJson?.error || `HTTP ${res.status}`;
+        console.warn(`Attempt ${attempt} addSubmission failed (${res.status}):`, lastError);
+      } catch (e: any) {
+        lastError = e.message;
+        console.warn(`Attempt ${attempt} addSubmission network error:`, e);
+      }
+      if (attempt < 3) {
+        await new Promise(r => setTimeout(r, 400 * attempt));
+      }
     }
+    return { success: false, error: lastError };
   },
 
   async deleteSubmission(id: string) {

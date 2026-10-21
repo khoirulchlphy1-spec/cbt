@@ -1,0 +1,6 @@
+{
+  "name": "Remix CBT SMAN 1 TOILI TEST4",
+  "description": "Aplikasi CBT Online SMAN 1 Toili + Anti Curang",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

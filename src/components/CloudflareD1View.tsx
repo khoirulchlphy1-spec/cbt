@@ -24,6 +24,7 @@ export const CloudflareD1View: React.FC<Props> = ({ showToast, onRefreshData }) 
   const [apiToken, setApiToken] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [isConfigured, setIsConfigured] = useState(false);
+  const [isNativeBinding, setIsNativeBinding] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<{
     success?: boolean;
     message?: string;
@@ -42,6 +43,7 @@ export const CloudflareD1View: React.FC<Props> = ({ showToast, onRefreshData }) 
     try {
       const data = await syncApi.getCloudflareStatus(runTest);
       setIsConfigured(Boolean(data.isConfigured));
+      setIsNativeBinding(Boolean(data.isNativeBinding));
       if (data.rawConfig) {
         setAccountId(data.rawConfig.accountId || '');
         setDatabaseId(data.rawConfig.databaseId || '');
@@ -49,6 +51,12 @@ export const CloudflareD1View: React.FC<Props> = ({ showToast, onRefreshData }) 
       }
       if (data.testResult) {
         setConnectionStatus(data.testResult);
+      } else if (data.isNativeBinding) {
+        setConnectionStatus({
+          success: true,
+          message: data.message || "Cloudflare D1 terhubung aktif secara native di Edge Pages Functions!",
+          latencyMs: 1
+        });
       }
     } catch (err) {
       console.warn("fetchStatus failed:", err);
@@ -208,6 +216,34 @@ export const CloudflareD1View: React.FC<Props> = ({ showToast, onRefreshData }) 
     showToast(`File ${filename} berhasil diunduh!`);
   };
 
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false);
+
+  const handleDownloadZip = async () => {
+    setIsDownloadingZip(true);
+    showToast("Sedang menyiapkan & mengunduh file project ZIP...");
+    try {
+      const res = await fetch('/api/download-zip');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = 'cbt-sman1toili-siap-deploy.zip';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }, 500);
+      showToast("Berhasil! File cbt-sman1toili-siap-deploy.zip telah terunduh.");
+    } catch (err: any) {
+      showToast("Gagal mengunduh file: " + (err.message || 'Coba lagi'));
+    } finally {
+      setIsDownloadingZip(false);
+    }
+  };
+
   const handleDownloadSchema = () => {
     fetch('/cloudflare_d1_schema.sql')
       .then(res => res.text())
@@ -282,6 +318,23 @@ export const CloudflareD1View: React.FC<Props> = ({ showToast, onRefreshData }) 
         </div>
       </div>
 
+      {/* Native Cloudflare Pages Alert Box */}
+      {isNativeBinding && (
+        <div className="bg-emerald-50 border-2 border-emerald-400 rounded-3xl p-5 text-emerald-950 shadow-sm flex flex-col md:flex-row items-start md:items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-md">
+            <Sparkles size={24} />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-black text-sm md:text-base text-emerald-900 flex items-center gap-2">
+              Status: Cloudflare D1 Terhubung Otomatis (Native Edge Binding)!
+            </h3>
+            <p className="text-xs text-emerald-800 mt-1 leading-relaxed">
+              Karena aplikasi CBT sudah di-host di Cloudflare Pages dengan binding internal <code className="font-mono bg-emerald-200/80 px-1.5 py-0.5 rounded font-bold text-emerald-950">env.DB</code>, Anda <strong>TIDAK PERLU</strong> mengisi kredensial (Account ID, API Token) dan <strong>TIDAK PERLU</strong> menekan tombol sinkronisasi manual. Seluruh data akun siswa, paket soal, ujian, dan jawaban tersimpan otomatis ke Cloudflare D1 secara real-time!
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Grid: Credentials Form & Action Center */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Credentials Form */}
@@ -293,10 +346,29 @@ export const CloudflareD1View: React.FC<Props> = ({ showToast, onRefreshData }) 
               </div>
               <div>
                 <h3 className="font-bold text-sm text-slate-800">Kredensial Cloudflare D1</h3>
-                <p className="text-[11px] text-slate-400">Kunci akses untuk komunikasi dengan D1 REST API</p>
+                <p className="text-[11px] text-slate-400">
+                  {isNativeBinding ? 'Otomatis dihandle via Pages Binding (Opsional untuk Localhost)' : 'Kunci akses untuk komunikasi dengan D1 REST API'}
+                </p>
               </div>
             </div>
+            {isNativeBinding && (
+              <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded-lg flex items-center gap-1">
+                <CheckCircle size={12} /> Terhubung Native
+              </span>
+            )}
           </div>
+
+          {isNativeBinding && (
+            <div className="mb-4 p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-2xl text-xs text-emerald-900">
+              <div className="font-bold flex items-center gap-1.5 text-emerald-800 mb-1">
+                <CheckCircle size={15} className="text-emerald-600" />
+                Tidak Perlu Diisi Lagi
+              </div>
+              <p className="text-[11px] leading-relaxed text-slate-600">
+                Form di bawah ini tidak perlu diisi karena Cloudflare Pages membaca database D1 langsung dari server internal. Form ini hanya digunakan jika Anda mengembangkan di komputer lokal (localhost).
+              </p>
+            </div>
+          )}
 
           <form onSubmit={handleSaveConfig} className="space-y-4">
             <div>
@@ -394,6 +466,15 @@ export const CloudflareD1View: React.FC<Props> = ({ showToast, onRefreshData }) 
               </div>
             </div>
 
+            {isNativeBinding && (
+              <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-2xl text-xs text-blue-900 flex items-start gap-2.5">
+                <Sparkles size={16} className="text-blue-600 shrink-0 mt-0.5" />
+                <p className="text-[11px] leading-relaxed">
+                  <strong>Otomatis Real-time:</strong> Di Cloudflare Pages, Anda tidak perlu menekan tombol Push/Pull lagi. Setiap jawaban siswa atau perubahan data langsung tersimpan otomatis ke Cloudflare D1.
+                </p>
+              </div>
+            )}
+
             <div className="space-y-3">
               {/* Action 1: Auto Migrate / Init Schema */}
               <div className="p-4 bg-slate-50 hover:bg-slate-100/80 rounded-2xl border border-slate-200 transition-all flex items-center justify-between gap-3">
@@ -462,30 +543,49 @@ export const CloudflareD1View: React.FC<Props> = ({ showToast, onRefreshData }) 
               </div>
             </div>
 
-            {/* Quick Downloads */}
-            <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap items-center gap-2">
-              <a
-                href="/cbt-sman1toili-siap-deploy.zip"
-                download="cbt-sman1toili-siap-deploy.zip"
-                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs"
-                title="Unduh seluruh source code CBT lengkap siap di-upload ke GitHub atau Cloudflare Pages"
-              >
-                <Download size={15} /> Unduh File Project CBT (ZIP)
-              </a>
-              <button
-                type="button"
-                onClick={handleDownloadSchema}
-                className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <Download size={14} /> Skema D1 (.sql)
-              </button>
-              <button
-                type="button"
-                onClick={handleDownloadWrangler}
-                className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <Download size={14} /> wrangler.toml
-              </button>
+            {/* Quick Downloads & Deploy Package */}
+            <div className="mt-5 pt-4 border-t border-slate-100 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Download size={14} className="text-indigo-600" />
+                  Paket Deploy & Berkas Konfigurasi
+                </span>
+                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                  Siap Deploy (Update Terbaru)
+                </span>
+              </div>
+              
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadZip}
+                  disabled={isDownloadingZip}
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-md shadow-indigo-600/30 cursor-pointer disabled:opacity-50"
+                  title="Unduh seluruh source code CBT lengkap siap di-upload ke GitHub atau Cloudflare Pages (cbt-sman1toili-siap-deploy.zip)"
+                >
+                  <Download size={16} className={isDownloadingZip ? 'animate-bounce' : ''} />
+                  <span>{isDownloadingZip ? 'Mengunduh ZIP...' : 'Unduh Paket Deploy ZIP (cbt-sman1toili-siap-deploy.zip)'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadSchema}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                  title="Unduh file skema SQL database Cloudflare D1"
+                >
+                  <Download size={14} /> Skema D1 (.sql)
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadWrangler}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                  title="Unduh file wrangler.toml konfigurasi D1"
+                >
+                  <Download size={14} /> wrangler.toml
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500 italic">
+                * File <strong>cbt-sman1toili-siap-deploy.zip</strong> sudah mencakup source code lengkap, fungsi Cloudflare D1, dan perbaikan perlindungan identitas siswa agar nama tidak hilang saat selesai ujian.
+              </p>
             </div>
           </div>
         </div>

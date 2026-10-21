@@ -53,6 +53,11 @@ CREATE TABLE IF NOT EXISTS exam_packages (
     duration_minutes INTEGER DEFAULT 70,
     is_active INTEGER DEFAULT 1,
     subject_name TEXT,
+    start_date TEXT,
+    start_time TEXT,
+    end_date TEXT,
+    end_time TEXT,
+    enable_schedule INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (question_package_id) REFERENCES question_packages(id)
 );
@@ -124,3 +129,11 @@ CREATE INDEX IF NOT EXISTS idx_students_class ON students(class);
 CREATE INDEX IF NOT EXISTS idx_students_session ON students(session);
 CREATE INDEX IF NOT EXISTS idx_submissions_class ON submissions(student_class);
 CREATE INDEX IF NOT EXISTS idx_submissions_subject ON submissions(subject_name);
+
+-- Pemulihan Otomatis Data Submisi yang namanya kosong (Heal Missing Student Names in Submissions)
+UPDATE submissions 
+SET 
+  student_name = COALESCE((SELECT name FROM students WHERE students.id = submissions.student_id AND students.name != ''), student_name),
+  student_class = COALESCE((SELECT class FROM students WHERE students.id = submissions.student_id AND students.class != ''), student_class),
+  username = COALESCE((SELECT username FROM students WHERE students.id = submissions.student_id AND students.username != ''), submissions.username)
+WHERE student_name = '' OR student_name IS NULL;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Check, Key, Clock, Layers, Users, UserCheck, Search, Filter } from 'lucide-react';
+import { X, Check, Key, Clock, Layers, Users, UserCheck, Search, Filter, Calendar } from 'lucide-react';
 import { ExamPackage, QuestionPackage, Student } from '../types';
 
 interface ExamPackageModalProps {
@@ -32,10 +32,26 @@ export const ExamPackageModal: React.FC<ExamPackageModalProps> = ({
   const [token, setToken] = useState('ANBK2026');
   const [durationMinutes, setDurationMinutes] = useState(70);
   const [isActive, setIsActive] = useState(true);
+
+  // Penjadwalan Ujian (Scheduling)
+  const getTodayDateStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const [enableSchedule, setEnableSchedule] = useState(false);
+  const [startDate, setStartDate] = useState(getTodayDateStr());
+  const [startTime, setStartTime] = useState('07:30');
+  const [endDate, setEndDate] = useState(getTodayDateStr());
+  const [endTime, setEndTime] = useState('09:00');
+
   const [error, setError] = useState('');
 
   // Extract unique classes from student list + defaults
-  const defaultClassList = ['X MIPA 1', 'X MIPA 2', 'XI IPA 1', 'XI IPA 2', 'XII IPA 1', 'XII IPA 2'];
+  const defaultClassList = ['X A', 'X B', 'X C', 'X D', 'XI A', 'XI B', 'XII A', 'XII B'];
   const availableClasses = Array.from(
     new Set([...students.map(s => s.class).filter(Boolean), ...defaultClassList])
   );
@@ -57,17 +73,14 @@ export const ExamPackageModal: React.FC<ExamPackageModalProps> = ({
 
     let updated: string[] = [];
     if (isAllClasses) {
-      // If was ALL, switch to only this class
       updated = [c];
     } else if (currentSelectedClasses.includes(c)) {
-      // Uncheck this class
       updated = currentSelectedClasses.filter(cls => cls !== c);
       if (updated.length === 0) {
         setTargetClass('ALL');
         return;
       }
     } else {
-      // Add this class
       updated = [...currentSelectedClasses.filter(cls => cls !== 'ALL'), c];
     }
 
@@ -89,6 +102,13 @@ export const ExamPackageModal: React.FC<ExamPackageModalProps> = ({
       setToken(activeExam.token || 'ANBK2026');
       setDurationMinutes(activeExam.durationMinutes || 70);
       setIsActive(typeof activeExam.isActive === 'boolean' ? activeExam.isActive : true);
+
+      // Set schedule values
+      setEnableSchedule(Boolean(activeExam.enableSchedule));
+      setStartDate(activeExam.startDate || getTodayDateStr());
+      setStartTime(activeExam.startTime || '07:30');
+      setEndDate(activeExam.endDate || activeExam.startDate || getTodayDateStr());
+      setEndTime(activeExam.endTime || '09:00');
     } else {
       setTitle('');
       setQuestionPackageId(questionPackages[0]?.id || '');
@@ -98,6 +118,12 @@ export const ExamPackageModal: React.FC<ExamPackageModalProps> = ({
       setToken(`CBT${Math.floor(1000 + Math.random() * 9000)}`);
       setDurationMinutes(70);
       setIsActive(true);
+
+      setEnableSchedule(false);
+      setStartDate(getTodayDateStr());
+      setStartTime('07:30');
+      setEndDate(getTodayDateStr());
+      setEndTime('09:00');
     }
     setError('');
   }, [activeExam?.id, isOpen]);
@@ -148,6 +174,21 @@ export const ExamPackageModal: React.FC<ExamPackageModalProps> = ({
       return;
     }
 
+    if (enableSchedule) {
+      if (!startDate || !startTime) {
+        setError('Harap lengkapi tanggal dan jam mulai ujian.');
+        return;
+      }
+      if (!endDate || !endTime) {
+        setError('Harap lengkapi tanggal dan jam selesai ujian.');
+        return;
+      }
+      if (startDate > endDate || (startDate === endDate && startTime >= endTime)) {
+        setError('Waktu selesai ujian harus lebih besar dari waktu mulai ujian.');
+        return;
+      }
+    }
+
     const selectedPkg = questionPackages.find(p => p.id === questionPackageId);
 
     // Compute display target class text
@@ -166,6 +207,11 @@ export const ExamPackageModal: React.FC<ExamPackageModalProps> = ({
       durationMinutes: Number(durationMinutes) || 60,
       isActive: isActive,
       subjectName: selectedPkg?.subject || 'Umum',
+      startDate: startDate,
+      startTime: startTime,
+      endDate: endDate,
+      endTime: endTime,
+      enableSchedule: enableSchedule,
       createdAt: activeExam?.createdAt || new Date().toISOString()
     });
 
@@ -185,7 +231,7 @@ export const ExamPackageModal: React.FC<ExamPackageModalProps> = ({
               <h3 className="text-lg font-bold text-slate-800">
                 {activeExam ? 'Edit Paket Ujian' : 'Buat Paket Ujian Baru'}
               </h3>
-              <p className="text-xs text-slate-500">Kelola nama paket, bank soal, target siswa/kelas & durasi</p>
+              <p className="text-xs text-slate-500">Kelola nama paket, bank soal, jadwal ujian, target siswa & durasi</p>
             </div>
           </div>
           <button 
@@ -240,7 +286,159 @@ export const ExamPackageModal: React.FC<ExamPackageModalProps> = ({
             </select>
           </div>
 
-          {/* 3. Target Peserta: Pilihan Langsung Kelas OR Siswa Spesifik */}
+          {/* 3. Penjadwalan Ujian (Scheduling) */}
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                  <Calendar size={18} />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                    Atur Penjadwalan Ujian
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Kunci akses ujian berdasarkan tanggal dan jam pelaksanaan
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input 
+                  type="checkbox"
+                  checked={enableSchedule}
+                  onChange={e => setEnableSchedule(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                <span className="ml-2 text-xs font-bold text-slate-700">
+                  {enableSchedule ? 'Aktif' : 'Nonaktif'}
+                </span>
+              </label>
+            </div>
+
+            {enableSchedule ? (
+              <div className="pt-2 border-t border-slate-200/80 space-y-3">
+                {/* Pilihan Cepat Sesi Ujian */}
+                <div>
+                  <span className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5">
+                    Pilihan Cepat Sesi Ujian SMAN 1 TOILI:
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStartTime('07:30');
+                        setEndTime('09:00');
+                        setDurationMinutes(70);
+                      }}
+                      className="px-2.5 py-1.5 bg-white hover:bg-indigo-50 hover:border-indigo-300 border border-slate-200 rounded-xl text-[11px] font-bold text-slate-700 transition-colors text-center cursor-pointer"
+                    >
+                      Sesi 1 (07:30 - 09:00)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStartTime('10:00');
+                        setEndTime('11:30');
+                        setDurationMinutes(70);
+                      }}
+                      className="px-2.5 py-1.5 bg-white hover:bg-indigo-50 hover:border-indigo-300 border border-slate-200 rounded-xl text-[11px] font-bold text-slate-700 transition-colors text-center cursor-pointer"
+                    >
+                      Sesi 2 (10:00 - 11:30)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStartTime('12:30');
+                        setEndTime('14:00');
+                        setDurationMinutes(70);
+                      }}
+                      className="px-2.5 py-1.5 bg-white hover:bg-indigo-50 hover:border-indigo-300 border border-slate-200 rounded-xl text-[11px] font-bold text-slate-700 transition-colors text-center cursor-pointer"
+                    >
+                      Sesi 3 (12:30 - 14:00)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStartTime('07:00');
+                        setEndTime('17:00');
+                        setDurationMinutes(90);
+                      }}
+                      className="px-2.5 py-1.5 bg-white hover:bg-indigo-50 hover:border-indigo-300 border border-slate-200 rounded-xl text-[11px] font-bold text-slate-700 transition-colors text-center cursor-pointer"
+                    >
+                      Seharian Penuh
+                    </button>
+                  </div>
+                </div>
+
+                {/* Form Input Tanggal & Jam Mulai - Selesai */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  {/* Waktu Mulai */}
+                  <div className="bg-white p-2.5 rounded-xl border border-slate-200">
+                    <label className="block text-[11px] font-bold text-emerald-700 uppercase mb-1">
+                      Waktu Mulai Ujian:
+                    </label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <input 
+                        type="date"
+                        required={enableSchedule}
+                        value={startDate}
+                        onChange={e => {
+                          setStartDate(e.target.value);
+                          if (!endDate || endDate < e.target.value) {
+                            setEndDate(e.target.value);
+                          }
+                        }}
+                        className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                      <input 
+                        type="time"
+                        required={enableSchedule}
+                        value={startTime}
+                        onChange={e => setStartTime(e.target.value)}
+                        className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Waktu Selesai */}
+                  <div className="bg-white p-2.5 rounded-xl border border-slate-200">
+                    <label className="block text-[11px] font-bold text-rose-700 uppercase mb-1">
+                      Waktu Selesai Ujian:
+                    </label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <input 
+                        type="date"
+                        required={enableSchedule}
+                        value={endDate}
+                        min={startDate}
+                        onChange={e => setEndDate(e.target.value)}
+                        className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                      <input 
+                        type="time"
+                        required={enableSchedule}
+                        value={endTime}
+                        onChange={e => setEndTime(e.target.value)}
+                        className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-slate-500">
+                  ℹ️ Siswa hanya diizinkan memulai ujian pada rentang tanggal dan jam yang telah ditentukan. Di luar jadwal tersebut, token akan terkunci otomatis.
+                </p>
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400 italic">
+                Penjadwalan dinonaktifkan. Paket ujian ini dapat diakses kapan saja selama statusnya Aktif.
+              </p>
+            )}
+          </div>
+
+          {/* 4. Target Peserta: Pilihan Langsung Kelas OR Siswa Spesifik */}
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
               Target Peserta Ujian <span className="text-red-500">*</span>
@@ -293,7 +491,7 @@ export const ExamPackageModal: React.FC<ExamPackageModalProps> = ({
                   </div>
 
                   {/* Multi-class Buttons Grid */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 my-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 my-2">
                     {availableClasses.map(c => {
                       const isSelected = !isAllClasses && currentSelectedClasses.map(s => s.toUpperCase()).includes(c.toUpperCase());
                       return (
@@ -332,7 +530,7 @@ export const ExamPackageModal: React.FC<ExamPackageModalProps> = ({
                   </label>
                   <input 
                     type="text"
-                    placeholder="Contoh: X MIPA 1, X MIPA 2, XI IPA 1"
+                    placeholder="Contoh: X A, X B, XI A"
                     value={targetClass}
                     onChange={e => setTargetClass(e.target.value)}
                     className="w-full px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
@@ -405,11 +603,11 @@ export const ExamPackageModal: React.FC<ExamPackageModalProps> = ({
             )}
           </div>
 
-          {/* 4. Durasi Ujian & Presets */}
+          {/* 5. Durasi Ujian & Token */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                Durasi Ujian (Menit) <span className="text-red-500">*</span>
+                Durasi Pengerjaan (Menit) <span className="text-red-500">*</span>
               </label>
               <div className="relative mb-1.5">
                 <input 
